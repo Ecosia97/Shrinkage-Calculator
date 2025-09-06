@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shrinkage Calculator (3D Printing)</title>
+  <style>
+    :root { --bg:#0b0d10; --card:#131720; --muted:#9aa4b2; --text:#e6edf3; --accent:#4da3ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; background:linear-gradient(160deg,#0b0d10,#0e1116); color:var(--text); }
+    .wrap { max-width: 960px; margin: 40px auto; padding: 20px; }
+    .card { background: var(--card); border: 1px solid #1f2633; border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    h1 { margin: 0 0 8px; font-size: clamp(22px, 4vw, 32px); }
+    p.lead { margin: 0 0 18px; color: var(--muted); }
+
+    .grid { display: grid; grid-template-columns: repeat(12,1fr); gap: 16px; align-items: end; }
+    .field { grid-column: span 12; }
+    @media (min-width:720px){ .field.sm6{ grid-column: span 6; } .field.sm4{ grid-column: span 4; } .field.sm3{ grid-column: span 3; } }
+    label { display:block; font-size: 14px; color: var(--muted); margin: 0 0 6px; }
+    select, input { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid #2a3141; background:#0f1218; color: var(--text); outline: none; }
+    input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(77,163,255,.25); }
+
+    .results { margin-top: 18px; display: grid; gap: 12px; }
+    .result { background:#0f131b; border:1px solid #222a38; border-radius: 12px; padding: 12px 14px; display:flex; justify-content: space-between; gap:12px; align-items:center; }
+    .result .label { color: var(--muted); font-size: 14px; }
+    .result .value { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+    .hint { color: var(--muted); font-size: 13px; margin-top: 10px; }
+    .footer { margin-top: 18px; color: var(--muted); font-size: 12px; text-align: center; }
+    .row { display:flex; flex-wrap:wrap; gap:16px; align-items:flex-end; }
+    .field.inline { flex:1 1 220px; }
+    .pill { display:inline-block; padding: 6px 10px; border-radius:999px; background: #10243a; border:1px solid #1f3b5e; color:#cde6ff; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 id="title">🧮 Shrinkage Calculator</h1>
+      <p class="lead" id="lead">Enter the <strong>Nominal size (Original)</strong> and the <strong>Measured size (Printed)</strong>. The tool computes the <em>shrinkage in %</em>, the <em>scale factor</em>, and the <em>+% correction</em> you can use in your slicer.</p>
+
+      <div class="row" style="margin-bottom: 8px;">
+        <div class="field inline" style="max-width:260px;">
+          <label for="lang" id="langLabel">Language</label>
+          <select id="lang"></select>
+        </div>
+        <div class="field inline" style="max-width:200px;">
+          <label for="unit" id="unitLabel">Unit</label>
+          <select id="unit">
+            <option value="mm">Millimeters (mm)</option>
+            <option value="inch">Inches (inch)</option>
+          </select>
+        </div>
+        <div class="field inline" style="max-width:220px;">
+          <span class="pill" id="unitNote">All values in mm</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="field sm4">
+          <label for="original" id="originalLabel">Original (Nominal)</label>
+          <input id="original" type="text" inputmode="decimal" placeholder="e.g., 100" value="100" />
+        </div>
+        <div class="field sm4">
+          <label for="printed" id="printedLabel">Printed (Measured)</label>
+          <input id="printed" type="text" inputmode="decimal" placeholder="e.g., 99.7" value="99.7" />
+        </div>
+      </div>
+
+      <div class="results" id="results" aria-live="polite"></div>
+
+      <p class="hint" id="hint">Note: Decimal separators <strong>comma</strong> or <strong>dot</strong> are accepted. The unit only affects display, not the formula — both values must use the same unit.</p>
+
+      <div class="footer" id="footer">Formulas: Shrinkage % = (Original − Printed) / Original × 100 · Scale factor = Original / Printed · +% correction = (Scale factor − 1) × 100</div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (s) => document.querySelector(s);
+
+    // --- Available languages (dropdown options) ---
+    const languageOptions = [
+      { code: 'en-US', name: 'English (US)' },
+      { code: 'de',    name: 'Deutsch' },
+      { code: 'fr',    name: 'Français' },
+      { code: 'es',    name: 'Español' },
+      { code: 'it',    name: 'Italiano' },
+      { code: 'pt-PT', name: 'Português (Portugal)' },
+      { code: 'nl',    name: 'Nederlands' },
+      { code: 'da',    name: 'Dansk' },
+      { code: 'sv',    name: 'Svenska' },
+      { code: 'fi',    name: 'Suomi' },
+      { code: 'pl',    name: 'Polski' },
+      { code: 'cs',    name: 'Čeština' },
+      { code: 'sk',    name: 'Slovenčina' },
+      { code: 'hu',    name: 'Magyar' },
+      { code: 'ro',    name: 'Română' },
+      { code: 'bg',    name: 'Български' },
+      { code: 'el',    name: 'Ελληνικά' },
+      { code: 'et',    name: 'Eesti' },
+      { code: 'lv',    name: 'Latviešu' },
+      { code: 'lt',    name: 'Lietuvių' },
+      { code: 'sl',    name: 'Slovenščina' },
+      { code: 'hr',    name: 'Hrvatski' },
+      { code: 'mt',    name: 'Malti' },
+      { code: 'ga',    name: 'Gaeilge' },
+      { code: 'nb',    name: 'Norsk (Bokmål)' },
+      { code: 'is',    name: 'Íslenska' },
+      { code: 'sq',    name: 'Shqip' },
+      { code: 'mk',    name: 'Македонски' },
+      { code: 'sr',    name: 'Српски' },
+      { code: 'bs',    name: 'Bosanski' },
+      { code: 'uk',    name: 'Українська' },
+      { code: 'be',    name: 'Беларуская' },
+      { code: 'ru',    name: 'Русский' },
+      { code: 'tr',    name: 'Türkçe' },
+      { code: 'cy',    name: 'Cymraeg' },
+      { code: 'gd',    name: 'Gàidhlig' },
+      { code: 'lb',    name: 'Lëtzebuergesch' },
+      { code: 'ca',    name: 'Català' },
+      { code: 'eu',    name: 'Euskara' },
+      { code: 'gl',    name: 'Galego' }
+    ];
+
+    // --- Minimal translations (fallback to en-US if missing) ---
+    const tDict = {
+      'en-US': {
+        title: '🧮 Shrinkage Calculator',
+        lead: 'Enter the <strong>Nominal size (Original)</strong> and the <strong>Measured size (Printed)</strong>. The tool computes the <em>shrinkage in %</em>, the <em>scale factor</em>, and the <em>+% correction</em> you can use in your slicer.',
+        langLabel: 'Language',
+        unitLabel: 'Unit',
+        originalLabel: 'Original (Nominal)',
+        printedLabel: 'Printed (Measured)',
+        unit_mm: 'Millimeters (mm)',
+        unit_inch: 'Inches (inch)',
+        unitNote: (u)=>`All values in ${u}`,
+        hint: 'Note: Decimal separators <strong>comma</strong> or <strong>dot</strong> are accepted. The unit only affects display, not the formula — both values must use the same unit.',
+        footer: 'Formulas: Shrinkage % = (Original − Printed) / Original × 100 · Scale factor = Original / Printed · +% correction = (Scale factor − 1) × 100',
+        status_invalid: 'Please enter valid, positive numbers.',
+        statusLabel: 'Status',
+        res_shrinkage: 'Shrinkage (percent) — X',
+        res_scale: 'Scale factor (to correct)',
+        res_corrpct: '+% correction (scale up in slicer)',
+        res_abs_error: 'Absolute error',
+        phOriginal: 'e.g., 100',
+        phPrinted: 'e.g., 99.7',
+        locale: 'en-US',
+      },
+      'de': {
+        title: '🧮 Shrinkage‑Rechner',
+        lead: 'Gib <strong>Soll‑Maß (Original)</strong> und <strong>Ist‑Maß (Gedruckt)</strong> ein. Das Tool berechnet die <em>Shrinkage in %</em>, den <em>Skalierungs‑Faktor</em> sowie die <em>+% Korrektur</em> für den Slicer.',
+        langLabel: 'Sprache',
+        unitLabel: 'Einheit',
+        originalLabel: 'Original (Soll)',
+        printedLabel: 'Gedruckt (Ist)',
+        unit_mm: 'Millimeter (mm)',
+        unit_inch: 'Zoll (inch)',
+        unitNote: (u)=>`Alle Werte in ${u}`,
+        hint: 'Hinweis: Dezimaltrennzeichen <strong>Komma</strong> oder <strong>Punkt</strong> sind erlaubt. Die Einheit beeinflusst nur die Anzeige — beide Maße müssen in derselben Einheit eingegeben werden.',
+        footer: 'Formeln: Shrinkage % = (Original − Gedruckt) / Original × 100 · Skalierungs‑Faktor = Original / Gedruckt · +% Korrektur = (Skalierungs‑Faktor − 1) × 100',
+        status_invalid: 'Bitte gültige, positive Zahlen eingeben.',
+        statusLabel: 'Status',
+        res_shrinkage: 'Shrinkage (Prozent) – X',
+        res_scale: 'Skalierungs‑Faktor (zum Korrigieren)',
+        res_corrpct: '+% Korrektur (im Slicer skalieren)',
+        res_abs_error: 'Absoluter Fehler',
+        phOriginal: 'z. B. 100',
+        phPrinted: 'z. B. 99,7',
+        locale: 'de-DE',
+      },
+      'fr': { locale: 'fr-FR' },
+      'es': { locale: 'es-ES' },
+      'it': { locale: 'it-IT' },
+      'pt-PT': { locale: 'pt-PT' },
+      'nl': { locale: 'nl-NL' },
+      'pl': { locale: 'pl-PL' },
+      'cs': { locale: 'cs-CZ' },
+      'sv': { locale: 'sv-SE' },
+      'da': { locale: 'da-DK' },
+      'fi': { locale: 'fi-FI' },
+      'ro': { locale: 'ro-RO' },
+      'bg': { locale: 'bg-BG' },
+      'el': { locale: 'el-GR' },
+      'et': { locale: 'et-EE' },
+      'lv': { locale: 'lv-LV' },
+      'lt': { locale: 'lt-LT' },
+      'sl': { locale: 'sl-SI' },
+      'hr': { locale: 'hr-HR' },
+      'mt': { locale: 'mt-MT' },
+      'ga': { locale: 'ga-IE' },
+      'nb': { locale: 'nb-NO' },
+      'is': { locale: 'is-IS' },
+      'sq': { locale: 'sq-AL' },
+      'mk': { locale: 'mk-MK' },
+      'sr': { locale: 'sr-RS' },
+      'bs': { locale: 'bs-BA' },
+      'uk': { locale: 'uk-UA' },
+      'be': { locale: 'be-BY' },
+      'ru': {
+        title: '🧮 Калькулятор усадки',
+        lead: 'Введите <strong>номинальный размер (оригинал)</strong> и <strong>измеренный размер (напечатано)</strong>. Инструмент вычисляет <em>усадку в %</em>, <em>масштабный коэффициент</em> и <em>коррекцию в %</em> для слайсера.',
+        langLabel: 'Язык',
+        unitLabel: 'Единица',
+        originalLabel: 'Оригинал (номинал)',
+        printedLabel: 'Напечатано (измерено)',
+        unit_mm: 'Миллиметры (mm)',
+        unit_inch: 'Дюймы (inch)',
+        unitNote: (u)=>`Все значения в ${u}`,
+        hint: 'Примечание: допускаются запятая или точка как десятичный разделитель. Единица влияет только на отображение — обе величины должны быть в одинаковых единицах.',
+        footer: 'Формулы: Усадка % = (Оригинал − Напечатано) / Оригинал × 100 · Масштаб = Оригинал / Напечатано · +% коррекция = (Масштаб − 1) × 100',
+        status_invalid: 'Введите корректные положительные числа.',
+        statusLabel: 'Статус',
+        res_shrinkage: 'Усадка (проценты) — X',
+        res_scale: 'Масштаб (для коррекции)',
+        res_corrpct: '+% коррекция (масштаб в слайсере)',
+        res_abs_error: 'Абсолютная ошибка',
+        phOriginal: 'напр., 100',
+        phPrinted: 'напр., 99,7',
+        locale: 'ru-RU',
+      },
+      'tr': { locale: 'tr-TR' },
+      'cy': { locale: 'cy' },
+      'gd': { locale: 'gd' },
+      'lb': { locale: 'lb' },
+      'ca': { locale: 'ca-ES' },
+      'eu': { locale: 'eu-ES' },
+      'gl': { locale: 'gl-ES' },
+    };
+
+    // --- Elements ---
+    const originalEl = $('#original');
+    const printedEl  = $('#printed');
+    const unitEl     = $('#unit');
+    const resultsEl  = $('#results');
+    const unitNoteEl = $('#unitNote');
+    const langEl     = $('#lang');
+
+    const titleEl = $('#title');
+    const leadEl  = $('#lead');
+    const langLabelEl = $('#langLabel');
+    const unitLabelEl = $('#unitLabel');
+    const originalLabelEl = $('#originalLabel');
+    const printedLabelEl  = $('#printedLabel');
+    const hintEl = $('#hint');
+    const footerEl = $('#footer');
+
+    // --- Populate language dropdown ---
+    function populateLang() {
+      langEl.innerHTML = '';
+      languageOptions.forEach(({code,name}) => {
+        const opt = document.createElement('option');
+        opt.value = code; opt.textContent = name; langEl.appendChild(opt);
+      });
+      // default language en-US
+      langEl.value = 'en-US';
+    }
+
+    function getStrings(code){
+      const base = tDict['en-US'];
+      const t = tDict[code] || {};
+      return { ...base, ...t };
+    }
+
+    function numberFormatter(locale){
+      return new Intl.NumberFormat(locale || 'en-US', { maximumFractionDigits: 6 });
+    }
+
+    // Robust decimal parser that accepts 12 345,67 · 12,345.67 · 99,7 · 99.7
+    function parseDec(str){
+      if (typeof str !== 'string') return NaN;
+      // remove spaces, NBSP, thin spaces, apostrophes/underscores used as thousands
+      str = str.trim().replace(/[\s\u00A0\u202F'_]/g, '');
+      const hasComma = str.includes(',');
+      const hasDot   = str.includes('.');
+
+      if (hasComma && hasDot){
+        const lastComma = str.lastIndexOf(',');
+        const lastDot   = str.lastIndexOf('.');
+        const decimalSep = lastComma > lastDot ? ',' : '.';
+        if (decimalSep === ','){
+          // remove dots (thousands), then use last comma as decimal
+          str = str.replace(/\./g, '');
+          const i = str.lastIndexOf(',');
+          str = str.slice(0, i).replace(/,/g, '') + '.' + str.slice(i+1);
+        } else {
+          // remove commas (thousands), dot already decimal
+          str = str.replace(/,/g, '');
+        }
+      } else if (hasComma){
+        const all = str.match(/,/g) || [];
+        if (all.length > 1){
+          const i = str.lastIndexOf(',');
+          str = str.slice(0, i).replace(/,/g, '') + '.' + str.slice(i+1);
+        } else {
+          str = str.replace(',', '.');
+        }
+      } else if (hasDot){
+        const all = str.match(/\./g) || [];
+        if (all.length > 1){
+          const i = str.lastIndexOf('.');
+          str = str.slice(0, i).replace(/\./g, '') + '.' + str.slice(i+1);
+        }
+      }
+
+      // keep only digits, a leading minus and a single dot
+      str = str.replace(/[^0-9.-]/g, '');
+      str = str.replace(/(?!^)-/g, '').replace(/\.(?=.*\.)/g, '');
+      return Number(str);
+    }
+
+    function row(label, value){
+      return `<div class="result"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function compute(){
+      const T = getStrings(langEl.value);
+      const nf = numberFormatter(T.locale);
+
+      const O = parseDec(originalEl.value);
+      const P = parseDec(printedEl.value);
+      const unit = unitEl.value === 'inch' ? (T.unit_inch || 'inch') : (T.unit_mm || 'mm');
+
+      unitNoteEl.textContent = (T.unitNote || ((u)=>`All values in ${u}`))(unit);
+      resultsEl.innerHTML = '';
+
+      if (!isFinite(O) || !isFinite(P) || O <= 0 || P <= 0){
+        resultsEl.innerHTML = row(T.statusLabel || 'Status', T.status_invalid || getStrings('en-US').status_invalid);
+        return;
+      }
+
+      const shrinkage = ((O - P) / O) * 100;   // % smaller
+      const scale     = O / P;                  // factor to correct
+      const corrPct   = (scale - 1) * 100;      // % scale up
+
+      const pct = (x) => nf.format(x) + ' %';
+      const fac = (x) => nf.format(x);
+
+      resultsEl.innerHTML = [
+        row(T.res_shrinkage || getStrings('en-US').res_shrinkage, pct(shrinkage)),
+        row(T.res_scale || getStrings('en-US').res_scale, fac(scale)),
+        row(T.res_corrpct || getStrings('en-US').res_corrpct, pct(corrPct)),
+        row(T.res_abs_error || getStrings('en-US').res_abs_error, `${nf.format(O - P)} ${unit}`)
+      ].join('');
+    }
+
+    function applyUI(){
+      const T = getStrings(langEl.value);
+
+      titleEl.textContent = T.title || getStrings('en-US').title;
+      leadEl.innerHTML = T.lead || getStrings('en-US').lead;
+      langLabelEl.textContent = T.langLabel || getStrings('en-US').langLabel;
+      unitLabelEl.textContent = T.unitLabel || getStrings('en-US').unitLabel;
+      originalLabelEl.textContent = T.originalLabel || getStrings('en-US').originalLabel;
+      printedLabelEl.textContent  = T.printedLabel  || getStrings('en-US').printedLabel;
+      hintEl.innerHTML = T.hint || getStrings('en-US').hint;
+      footerEl.innerHTML = T.footer || getStrings('en-US').footer;
+
+      // Update unit option labels
+      unitEl.options[0].textContent = T.unit_mm || getStrings('en-US').unit_mm;
+      unitEl.options[1].textContent = T.unit_inch || getStrings('en-US').unit_inch;
+
+      // Placeholders
+      originalEl.placeholder = T.phOriginal || getStrings('en-US').phOriginal;
+      printedEl.placeholder  = T.phPrinted  || getStrings('en-US').phPrinted;
+
+      compute();
+    }
+
+    ['input','change'].forEach(ev => {
+      originalEl.addEventListener(ev, compute);
+      printedEl.addEventListener(ev, compute);
+      unitEl.addEventListener(ev, compute);
+      langEl.addEventListener(ev, applyUI);
+    });
+
+    // init
+    populateLang();
+    applyUI();
+  </script>
+</body>
+</html>
